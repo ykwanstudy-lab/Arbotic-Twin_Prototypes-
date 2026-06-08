@@ -9,17 +9,17 @@ import Chatbot from './components/Chatbot';
 import { useEffect, useState } from 'react';
 
 export default function App() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<any>({
+    DBH: 42.5,
+    stem_count: 1,
+    trunk_details: "",
+    height: 14.2,
+    crown_spread: 9.1,
+    lean_angle: 18.5,
+    wind_load_resistance: "Moderate stress expected at base."
+  });
 
-  useEffect(() => {
-    // Initial fetch for fallback
-    fetch('/api/v1/tree-metrics/tree_001')
-      .then(res => res.json())
-      .then(d => {
-        if (!data) setData(d);
-      })
-      .catch(console.error);
-  }, []);
+  // No need for useEffect fetch since we supply default data, and any imported model will auto-update this state via the TreeModelViewer.
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-[#020617] text-[#f8fafc] overflow-hidden font-sans">

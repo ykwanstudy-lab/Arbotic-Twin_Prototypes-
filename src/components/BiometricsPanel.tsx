@@ -4,9 +4,13 @@ export default function BiometricsPanel({ data }: { data: any }) {
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-slate-800/50 border border-main p-3 rounded-lg">
-          <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">DBH (Diameter)</label>
-          <div className="text-xl font-bold font-mono text-[#f8fafc]">{data.DBH} <span className="text-xs font-normal opacity-60">cm</span></div>
+        <div className="bg-slate-800/50 border border-main p-3 rounded-lg flex flex-col justify-center">
+          <div className="flex justify-between items-start">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">DBH (Diameter)</label>
+            {data.stem_count > 1 && <span className="bg-slate-700/80 text-[8px] px-1.5 py-0.5 rounded text-emerald-400 font-mono border border-slate-600">{data.stem_count} Stems</span>}
+          </div>
+          <div className="text-xl font-bold font-mono text-[#f8fafc] leading-tight">{data.DBH} <span className="text-xs font-normal opacity-60">cm</span></div>
+          {data.stem_count > 1 && <div className="text-[9px] text-slate-400 font-mono mt-1 opacity-80 truncate" title={data.trunk_details}>({data.trunk_details})</div>}
         </div>
         <div className="bg-slate-800/50 border border-main p-3 rounded-lg">
           <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Height</label>

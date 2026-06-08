@@ -1,6 +1,8 @@
 {
   "name": "Arbotic Twin",
-  "description": "",
+  "description": "Interactive 3D model visualizer and analyzer for forest biometrics with custom axis reorientation, particle sizing, and biometric estimation.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
