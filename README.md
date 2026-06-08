@@ -54,14 +54,4 @@ This is a workspace-specific configuration file utilized by the hosting environm
 
 ---
 
-## What is an Application "Manifest"?
-
-In software engineering, a **manifest** is a metadata file that accompanies a program or project to describe its identity, requisites, permissions, and behavior to an external operating environment or browser, rather than holding executable logic itself.
-
-In this project, **`metadata.json`** acts as the application's platform-level manifest. Here is what its attributes control inside the workspace:
-
-- `"name"`: The user-facing name of your application displayed on dashboards and browser tabs.
-- `"description"`: A human-readable summary detailing the purpose of the app.
-- `"requestFramePermissions"`: Lists native hardware capabilities (like `["camera", "microphone", "geolocation"]`) that the iframe wrapper of the sandbox needs to request from your browser.
-- `"majorCapabilities"`: Registers system-level integration flags (such as `["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]`) telling the server proxy layers which backend features are enabled.
 
