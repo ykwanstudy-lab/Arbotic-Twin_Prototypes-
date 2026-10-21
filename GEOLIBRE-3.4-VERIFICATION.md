@@ -140,7 +140,7 @@ child-src 'self' http://127.0.0.1:* http://localhost:* https://accounts.google.c
 
 **可行替代（要改設計）**：
 1. Viewer 唔用 iframe，改成 plugin panel 內用 bundled three.js / `<model-viewer>` 自己 render（最可控，但要重寫 viewer 整合）。
-2. 開外部瀏覽器：`window.open(viewerUrl)` / Tauri opener，喺 Safari/Chrome 開（UX 差啲，但唔受 CSP frame-src 限制；要確認 mobile 上 opener 行為）。
+2. 開外部瀏覽器：用官方 plugin API `app.openExternalUrl?.(viewerUrl)`（**唔好用 `window.open` / `target="_blank"`**，GeoLibre 自己嘅 `open-external.ts` 明講 Tauri webview 會 ignore，見 §7）。呢個方法唔受 `frame-src` 限制。
 3. 只顯示截圖 / 下載連結，唔做 embedded 3D。
 
 **動作**：A4 gate 加一項「iframe CSP 實測」；如確認 block，A5 beats 要改（唔好當 iframe 一定得）。
@@ -210,4 +210,111 @@ child-src 'self' http://127.0.0.1:* http://localhost:* https://accounts.google.c
 - Google Play：https://play.google.com/store/apps/details?id=org.geolibre.app （3.4.0，2026-10-12）
 
 > 註：以上 GitHub 檔案內容以 2026-10-21 main branch 為準；GeoLibre 出 release 好密（3.0.0 → 3.4.0 只係一個月），A4 前請再 fetch 一次 tag `v3.4.0` 對照。
+
+
+---
+
+## 7. 2026-10-21 更新檢查（3.4.0 之後）
+
+### 7.1 GeoLibre releases / tags
+
+- **冇新 release、冇新 tag**：latest 仍然係 `v3.4.0`（published `2026-10-11T23:31:31Z`）。
+- Store 兩邊都仍然係 **3.4.0**：
+  - App Store：`version=3.4.0`、`2026-10-12T15:17:26Z`
+  - Google Play：`3.4.0`、`Updated on Oct 12, 2026`
+- `main` 已經超前 tag **38 個 commit**，但 `package.json` 仍然寫 `3.4.0`（即未 cut release）。
+- 出 release 節奏大約 5–7 日（v3.2 Oct 1 → v3.3 Oct 5 → v3.4 Oct 11），所以 **下一個 release 隨時出**；A4 開工前再 check 一次 tag，唔好當 3.4.0 永遠係最新。
+
+### 7.2 `main` 上 plugin 相關改動（未 release，additive）
+
+38 個 commit 入面同 plugin 有關嘅：
+
+- `feat(plugins): add updateGeoJsonLayer and removeLayer to the plugin API (#3128)`
+- `feat(plugins): honor expected-status markers in nativeFetch diagnostics (#3124)`
+- `feat(plugins): OAuth authorization-code sign-in for plugins (#3139)`
+- `feat(plugins): add addVectorTileLayer to the plugin API (#3140)`
+- `feat(plugins): GeoEditor session events and startEditSession for plugins (#3138)`
+- `feat(assistant): let the assistant turn on an installed plugin and use its tools in the same turn (#3160)`
+- `feat(plugins): pass the cancel signal to assistant tool specs (#3161)`
+
+全部係**新增 API**，冇 breaking；但呢啲**未喺 3.4.0 store build**，A4 唔可以依賴。
+
+**CSP 冇變**：`tauri.conf.json` 由 v3.4.0 到 main 只改咗 pglite CDN 版本（0.5.8 → 0.5.10），`frame-src` 完全一樣：
+
+```
+frame-src 'self' http://127.0.0.1:* http://localhost:* https://accounts.google.com https://www.google.com;
+```
+
+→ **iframe blocker 喺下一個 release 都仍然存在**，唔會自動消失。
+
+### 7.3 `geolibre-plugins` registry 格式
+
+- **兩個 schema 自 2026-10-09 之後冇再改**（`plugin-manifest.schema.json` 最後改動 2026-10-04；`registry-entry.schema.json` 最後改動 2026-10-09，加 `Cartography` category）。
+- 3.4.0 之後嘅 commit 全部係**內容更新**，唔係格式：
+  - `Add KML/KMZ import plugin (#33)`
+  - `feat: add Poster Studio map poster plugin (#107)`
+  - `Add Mapterhorn Terrain plugin (#108)`
+  - `Update openrndt-geolibre to 0.3.13 / 0.3.14 (#110 / #111)`
+- 所以：`minGeoLibreVersion` **仍然只係 registry entry 欄位**；manual manifest URL 仍然**冇版本閘**；`plugin.json` 加呢個 key 仍然零作用。
+- 補充：`registry-entry.schema.json` 係 `additionalProperties: false`，如果將來出 PR 打錯 `minGeolibreVersion`（細楷 l），CI 會直接 fail。
+
+---
+
+## 8. ⚠️ v2 要再改一處：`window.open` / `target="_blank"` 喺 Tauri 係唔 work 的
+
+呢點直接推翻 v2 嘅「CSP mitigation 只係突出條 `<a target=\"_blank\">`；KP ALS 用 `window.open` 免改」。
+
+證據（GeoLibre 自己嘅 code）：
+
+`apps/geolibre-desktop/src/lib/open-external.ts` 開頭註解：
+
+> The Tauri webview ignores `target="_blank"`/`window.open`, so route through the opener plugin there and fall back to `window.open` on the web build.
+
+而同一個檔嘅 `isTauri()`（`apps/geolibre-desktop/src/lib/is-tauri.ts`）係：
+
+```ts
+return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+```
+
+→ iOS / Android app 都符合（唔止 desktop），所以 `window.open` / `target="_blank"` 喺手機 store app **一樣會被 ignore**。
+
+正確做法：官方 plugin API 有 `openExternalUrl`：
+
+```ts
+// packages/plugins/src/types.ts
+openExternalUrl?: (url: string) => void;
+```
+
+- `v3.4.0`：`packages/plugins/src/types.ts` **L950 已經有**
+- `v2.8.0`：同一欄位 **L550 已經有**（即你哋 desktop 版都用得）
+- `app-api.ts` v3.4.0 L574：
+  ```ts
+  openExternalUrl: (url: string) => void openExternalLink(url),
+  ```
+- main 嘅 docs 已經補咗一句：
+  > desktop webview ignores `window.open`/`target="_blank"` … Plugins should call this rather than `window.open` directly.
+- **但 3.4.0 嘅 `docs/plugin-api.md` 完全冇提 `openExternalUrl`**（grep 0 次），所以只睇 3.4.0 docs 係唔會發現。
+
+建議寫法（optional chaining，兼容其他 host）：
+
+```js
+const openExternal = (url) => {
+  if (app?.openExternalUrl) app.openExternalUrl(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+};
+```
+
+- `<a>` 都要加 click handler：`e.preventDefault(); openExternal(url)`（保留 `href` 俾 web fallback / 右鍵複製）。
+- `capabilities/default.json` 已經有 `opener:allow-open-url`（`http://*` / `https://*`），所以 opener 喺 mobile 有 permission。
+- **仍然要真機試**：`openExternalUrl` 係 optional API，舊 host（2.8.0 desktop）有，但白牌 / 其他 host variant 可能冇，所以 fallback 一定要保留。
+
+---
+
+## 9. 對 v2 嘅淨影響（3 條）
+
+1. **A3 CSP 對策要改**：唔係「突出 `<a target=_blank>`」，而係「所有外開一律經 `app.openExternalUrl`」；**KP ALS 嘅 `window.open` 要改，唔係免改**。
+2. **A4 gate 加一項**：真機測 `openExternalUrl`（iframe 被 block 後嘅外開路徑），同時測 fallback `<a>` / `window.open` 係唔係真係死；`openExternalUrl` 喺 3.4.0 runtime 有、docs 冇，**靠 types 唔靠 docs**。
+3. **Registry 格式無變**：`minGeoLibreVersion` 仍然只喺 registry entry；`plugin.json` 加咗都冇用。下次 release 前再 check tag（main 已超前 38 commits）。
+
+> 更新檢查時間：2026-10-21；下次 A4 開工前建議再跑一次 `gh api repos/opengeos/GeoLibre/releases/latest`。
 
