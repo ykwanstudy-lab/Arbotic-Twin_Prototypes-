@@ -17,7 +17,7 @@
 | (3) CSP / frame-src | **Tauri build 與 docker nginx web build 都會擋外部 viewer domain**（`frame-src` 只准 self / localhost / Google）。`web.geolibre.app`（GitHub Pages）**完全沒有 CSP header**，所以不擋；Capacitor 外殼由我們自己的 CSP 決定。`connect-src` 兩邊都容許 `https:` → API domain 不受 CSP 擋。 |
 | (4) Plugin loader | manifest 必須 HTTPS（localhost 例外）；manifest 只認 `id/name/version/entry` 等固定欄位；entry 必須 `.js/.mjs`、以 blob `import()` 載入、export default 或 `plugin`；export 的 id/name/version 必須與 manifest 完全一致；entry+style 50MB 上限；URL plugin 有 SHA-256 trust-on-first-use pin，內容一變就 held back。全部在 web 也生效。 |
 | (5) 相機 / 檔案 / 大檔 | **沒有相機 API、沒有 `getUserMedia({video:true})`、沒有攝影測量（SfM/photogrammetry）**。唯一的 `getUserMedia` 是語音指令的**麥克風**。檔案輸入是標準 `<input type="file">`；field photo 上限 **2MB**、georeferencer 圖 **8MB**、local glTF **24MB**、plugin asset **50MB**。未找到通用大檔上載 endpoint／上載 size cap。 |
-| **Android 外殼** | **外殼本身沒有 A0 blocker**（MIT + web fallback + plugin loader 可用）。**但產品層有 A0 blocker**：GeoLibre 沒有「影相 → 出 model」的 capture / photogrammetry pipeline；Google 圖像只是 Cesium Ion 的 Google Maps Satellite/Roadmap，不是 Google Maps JS API。用外殼包住它，只得到 GIS viewer + 圖層，不會變成 RealityScan/Polycam。 |
+| **Android 外殼** | **外殼本身沒有 shell-level A0 blocker**（MIT + web fallback + plugin loader 可用）。產品層缺口是「拍攝畫面」：GeoLibre 沒有 capture / photogrammetry，但同一個 Capacitor 外殼可以用原生 CameraX/ARCore 模組補；GeoLibre 只負責地圖／圖層／tree info。唔需要拆成兩個產品。 |
 
 ---
 
@@ -563,17 +563,112 @@
 | CSP（自架 docker nginx） | **可以繞過** | `frame-src` 擋外部 viewer（`docker/nginx.conf:199`）；改 nginx 加 domain 或用自己 reverse proxy。 |
 | CSP（載入 web.geolibre.app） | **無影響** | 實際 header 無 CSP（§3.3）；viewer 不被擋，但 API 必須 HTTPS。 |
 | `openExternalUrl` 外開 | **可以繞過** | web fallback 是 `window.open`（`open-external.ts:30`）；Capacitor 要改用 `@capacitor/browser` 或自訂 bridge，不能假設 window.open 開到。 |
-| 相機 / getUserMedia | **A0 blocker（產品層）** | 沒有 camera API、沒有 video getUserMedia；只有 audio 麥克風（`useVoiceCommands.ts:229`）。要自己做 capture。 |
-| 影相 → model（SfM） | **A0 blocker（產品層）** | 未找到任何 photogrammetry 實作；只有消費 3D Tiles（`docs/demos.md:10`）。 |
+| 相機 / getUserMedia | **可以繞過（同一 APK 加原生模組）** | GeoLibre 沒有 camera API、沒有 video getUserMedia；只有 audio 麥克風（`useVoiceCommands.ts:229`）。但外殼是我們的，可以用 Capacitor 原生 plugin / CameraX / ARCore 在同一個 app 內做拍攝畫面。 |
+| 影相 → model（SfM） | **可以繞過（後端負責）** | GeoLibre 未找到 photogrammetry 實作；只消費 3D Tiles（`docs/demos.md:10`）。photogrammetry 本來就是後端工作，GeoLibre 不需要負責。 |
 | Field collection 2MB 相片上限 | **可以繞過** | 不要用 field collection；自己影相／上載去我們的 pipeline（`field-collection.ts:84`）。 |
 | Plugin / asset 50MB 上限 | **可以繞過** | 大 model 放我們的 API / CDN，用 URL + Range；plugin code 保持 <50MB（`plugin-archive-unpack.ts:21`）。 |
-| `apps/map-plugin` 審核 | **未能審核** | **未找到**（本地與 `ykwanstudy-lab` 公開 repo 都沒有）。要提供正確 repo / path 才能審。 |
+| `apps/map-plugin` 審核 | **A0 blocker（未清）** | **未找到**（本地與 `ykwanstudy-lab` 公開 repo 都沒有）。未審前唔可以當 shell 完全無 blocker；要提供正確 repo / branch。 |
 
 ### 6.2 產品層結論
 
 - **只做 Android 外殼：就本次五項審計，冇 shell-level A0 blocker。** 你可以用 GeoLibre web build + Capacitor 出 APK，地圖、圖層、plugin、tree info overlay 都可行；Tauri-only 功能會缺席但不影響核心。（`apps/map-plugin` 未找到，plugin 自身有冇用 Tauri-only API 仍屬審計缺口。）
-- **要 RealityScan/Polycam 式「影相 → 出 model」：有 A0 blocker。** GeoLibre 完全沒有 capture / photogrammetry pipeline；這是另一個產品，不是外殼問題。要麼自己寫 capture + SfM（Android ARCore / 多視角 + server COLMAP/OpenMVS），要麼接第三方 photogrammetry API。
+- **要 RealityScan/Polycam 式「影相 → 出 model」：同一個 APK 可以做到，唔需要拆產品。** GeoLibre 本身沒有 capture / photogrammetry pipeline，這是事實；但外殼是我們的，可以在同一個 Capacitor app 內加原生拍攝模組（CameraX + ARCore），拍完交後端 SfM。後端用 **COLMAP（new BSD）**；**OpenMVS 是 AGPL-3.0，按既定 hosted 規則不可用**（見 §7.1 更正）。
 - **要 Google Maps 底圖 + tree info：Google 圖像有，但不是 Google Maps JS API。** pinned repo 有 `Google Maps Satellite`、`Satellite with Labels`、`Roadmap`、`Contour` 四個 imagery（`packages/core/src/cesium-imagery.ts:43-61`），全部是 **Cesium Ion `assetId`**；`google.maps.Map` / `maps.google.com/maps/api/js` / `@googlemaps` **未找到**。要真正的 Google Maps JS API（vector map、原生 marker/info window）是另一個整合；要 Google 圖像 + tree overlay，用 Cesium Ion 路線即可，但需要 Cesium Ion token（Google Photorealistic 3D Tiles 另需 Google Maps API key，`packages/plugins/src/plugins/maplibre-3d-tiles.ts:1213`）。
+
+
+---
+
+## 7. 更正與 A0 spike（單一 APK 方案）
+
+### 7.1 更正：OpenMVS 不可用，COLMAP 才是 hosted 選項
+
+- `cdcseacave/openMVS` 的 GitHub license API 回 **`AGPL-3.0`**；`LICENSE` 開頭是 `GNU AFFERO GENERAL PUBLIC LICENSE Version 3`。按你既定「hosted 環境不可用 AGPL」規則，**OpenMVS 不可用**。
+- `colmap/colmap` 的 `LICENSE:1-2` 原文：
+  > `The COLMAP library is licensed under the new BSD license. Note that this text refers only to the license for COLMAP itself, independent of its dependencies, which are separately licensed.`
+- 所以 §6.2 已改為 **COLMAP（new BSD）**，不再建議 OpenMVS。若用 RealityScan，先驗 EULA（未在本 audit 範圍）。
+
+### 7.2 Plugin 打包入 APK：GeoLibre v3.4.0 官方支援，而且豁免 integrity pin
+
+`docs/plugin-api.md:1441-1459`：
+
+> ```md
+> 1441 To ship an external plugin as part of GeoLibre — loaded automatically, with no Settings entry and no manifest URL — drop its built bundle into the Vite public directory, one folder per plugin id:
+> ...
+> 1450 ... The `bundledPlugins()` Vite plugin ... scans `public/plugins/` at build and dev-server start, exposes the discovered manifest paths through the `virtual:bundled-plugins` module, and `usePlugins.ts` loads them through the normal external-plugin path (fetch → blob import → register). Discovery happens at build time ...
+> ...
+> 1456 Bundled manifest URLs are injected at load time rather than stored in Settings. Bundled plugins are eligible to load without being listed in `allowed` or permitting sideload, but an id in `blocked` still prevents loading.
+> ```
+
+`apps/geolibre-desktop/src/lib/external-plugins.ts:381-383`：
+
+> ```ts
+> 381       // Bundled drop-ins are exempt from the pin; see `bundledManifestUrls` in
+> 382       // loadExternalPlugins for why. Everything else still goes through it.
+> 383       if (!bundledUrls.has(manifestUrls[index])) {
+> ```
+
+`apps/geolibre-desktop/src/hooks/usePlugins.ts:895-908`：
+
+> ```ts
+> 895 // tauri://localhost, allowed by `connect-src 'self'`). These are injected at
+> 896 // load time rather than stored in Settings, so a baked-in plugin always loads
+> 897 // and cannot be removed by the user. ...
+> 899 export function bundledPluginManifestUrls(): string[] {
+> ...
+> 906   return bundledPluginManifestPaths.map(
+> 907     (path) => new URL(path, new URL(base, window.location.href)).href,
+> 908   );
+> ```
+
+`docs/plugin-api.md:1463-1466`：
+
+> ```md
+> 1463 A bundled drop-in's `plugin.json` may additionally set `"activeByDefault": true`
+> 1464 to activate the plugin on startup. Saved plugin state still wins ...
+> 1466 The flag is honored **only** for bundled drop-ins; it does not bypass a blocked
+> ```
+
+**結論**：把 `apps/map-plugin` 的 build 產物放到 `apps/geolibre-desktop/public/plugins/<plugin-id>/`（`plugin.json` + entry + optional style），再 `npm run build`；`bundledPlugins()` 會在 build time 掃到，`usePlugins.ts` 自動載入。**不需要 manifest URL、不需要 integrity pin、不需要客戶重裝 plugin**；plugin 更新 = 重新出 APK。`blocked` 仍然有效（部署 policy），但 `allowed` / `sideload` 不適用。
+
+### 7.3 `window.Capacitor` 對 plugin 是否可見（static evidence）
+
+Capacitor 的 native layer 直接把 global 注入主 WebView：
+
+- Android `android/capacitor/src/main/java/com/getcapacitor/JSExport.java:20-22`：
+  > ```java
+  > 20     public static String getGlobalJS(Context context, boolean loggingEnabled, boolean isDebug) {
+  > 21         return "window.Capacitor = { DEBUG: " + isDebug + ", isLoggingEnabled: " + loggingEnabled + ", Plugins: {} };";
+  > 22     }
+  > ```
+- iOS `ios/Capacitor/Capacitor/JSExport.swift:19`：
+  > ```swift
+  > 19         let data = "window.Capacitor = { DEBUG: \(isDebug), isLoggingEnabled: \(loggingEnabled), Plugins: {} }; window.WEBVIEW_SERVER_URL = '\(localUrl)';"
+  > ```
+
+而 GeoLibre 的 external plugin 是 `import(moduleUrl)` 在同一個 window 內執行（`external-plugins.ts:610-615`，見 §4.3），不是 iframe、不是新 WebView。**靜態證據強烈支持 `window.Capacitor` 可見**；但這仍是推斷，未在中階 Android 機實測。A0 spike 必須用一個 Toast plugin 證明 bridge 通，失敗才考慮 fork GeoLibre 加 hook。
+
+> 以上 Capacitor 源碼取自 `ionic-team/capacitor` default branch（2026-10-21），不是特定 release；你哋 pin 的 Capacitor 版本要再用同一段 `JSExport` 核一次。
+
+### 7.4 URL GLB 有冇 24MB 限制？
+
+- `MAX_LOCAL_GLTF_BYTES = 24 * 1024 * 1024` 只用在 local file → data URL：`apps/geolibre-desktop/src/lib/local-gltf.ts:70`
+  > `export const MAX_LOCAL_GLTF_BYTES = 24 * 1024 * 1024;`
+  > `74   if (data.byteLength > MAX_LOCAL_GLTF_BYTES) throw new Error("modelTooLarge");`
+- URL 路徑是 `DeckVizSource.tsx:567-588` 的 `Input`（`toolbar.scenegraph.modelUrl`），直接寫入 `deckVizModelUrl`，**冇看到 size check**；sample 亦直接指向遠端 GLB：`apps/geolibre-desktop/src/lib/model-samples.ts:21`
+  > `modelUrl: "https://data.source.coop/giswqs/opengeos/shanghai-3d-model.glb",`
+- `MAX_MODEL_GLB_BYTES = 24 * 1024 * 1024` 另一處只在 KML inline model：`apps/geolibre-desktop/src/lib/file-io/kml-kmz.ts:525`。
+- **結論：未找到 URL GLB 的 24MB 硬上限**；24MB 只適用 local embed / KML inline。URL GLB 仍受 WebView 記憶體同 deck.gl 解碼能力限制，要實測（尤其 4G + 中階機）。
+
+### 7.5 A0 spike（1–2 日）成功標準
+
+1. **補審 plugin**：提供 `apps/map-plugin` 實際 repo / branch；如果 plugin 有用 `app.nativeFetch` / `window.open` / `pickLocalDirectoryFiles`，在 Capacitor 要改 optional-chain 或 bridge。
+2. **Bundled plugin build**：把 plugin build 產物放入 `public/plugins/<id>/`，`npm run build`，確認 `virtual:bundled-plugins` 有列出、app 啟動自動載入、Settings 冇 manifest URL、冇 integrity pin。
+3. **Capacitor bridge**：同一個 plugin 內呼叫一個自訂 Capacitor plugin（例如 Toast），證明 `window.Capacitor` 可見；同時測地圖流暢度、plugin 載入、Android back button。
+4. **URL GLB**：用一棵真實樹 GLB（>24MB 及 <24MB 各一）經 URL 載入，記錄記憶體 / 首次 render 時間；如果 OOM，改為後端 decimated LOD 或 3D Tiles。
+5. **後端**：COLMAP（new BSD）；**不要用 OpenMVS（AGPL-3.0）**。引擎實測（P0）仍然是「直接出 model」的關鍵，換外殼不會令處理變快。
+
+> A0 spike 未過之前，`window.Capacitor` 仍然係「static evidence strongly supports, device-unverified」。不要把推斷當事實。
+
 
 
 ---
